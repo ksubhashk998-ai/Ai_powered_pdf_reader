@@ -1,3 +1,4 @@
+
 # 🎓 MindCraft AI - AI-Powered PDF Reader, Explainer & Intelligent Question Generator
 
 > **Full-Stack Monorepo Architecture**: Separated Express.js Node.js REST API Backend (`/backend`) + React TypeScript Vite Frontend (`/frontend`).
@@ -108,3 +109,6 @@ npm start
 ## 📄 License
 
 MIT License. Free to use for study, research, and educational projects.
+
+# Ai_powered_pdf_reader
+
