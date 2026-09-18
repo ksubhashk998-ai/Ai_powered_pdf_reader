@@ -163,7 +163,9 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
         </div>
 
         {/* 2. Secondary PYQ Upload (Previous Year Papers) */}
-        <div className="glass-card rounded-2xl p-6 border border-slate-800 flex flex-col justify-between space-y-4">
+        <div className={`glass-card rounded-2xl p-6 border flex flex-col justify-between space-y-4 transition-all ${
+          activeDoc && !pyqDoc ? 'border-purple-500/40 shadow-lg shadow-purple-500/5' : 'border-slate-800'
+        }`}>
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -175,7 +177,19 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                   <p className="text-xs text-slate-400">Past Exam Papers & Mid-term question sets</p>
                 </div>
               </div>
-              <span className="text-xs font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded">OPTIONAL</span>
+              {activeDoc && !pyqDoc ? (
+                <span className="text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded animate-pulse">
+                  READY TO UPLOAD
+                </span>
+              ) : pyqDoc ? (
+                <span className="text-xs font-bold text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded">
+                  ATTACHED
+                </span>
+              ) : (
+                <span className="text-xs font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded">
+                  OPTIONAL
+                </span>
+              )}
             </div>
 
             <input
@@ -191,6 +205,8 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
               className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all ${
                 pyqDoc 
                   ? 'border-purple-500/40 bg-purple-500/5' 
+                  : activeDoc
+                  ? 'border-purple-500/50 bg-purple-950/20 hover:border-purple-400 hover:bg-purple-900/30 ring-1 ring-purple-500/30'
                   : 'border-slate-800 hover:border-purple-500/50 hover:bg-slate-900/50'
               }`}
             >
@@ -208,10 +224,14 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <Upload className="w-8 h-8 text-purple-400 mx-auto" />
+                  <Upload className={`w-8 h-8 mx-auto ${activeDoc ? 'text-purple-300' : 'text-purple-400'}`} />
                   <div>
-                    <p className="text-sm font-semibold text-slate-200">Click to upload PYQ Exam PDF</p>
-                    <p className="text-xs text-slate-400 mt-1">Enables PYQ Trend Analyzer & Importance Scoring</p>
+                    <p className="text-sm font-semibold text-slate-200">
+                      {activeDoc ? 'Click to upload PYQ Exam PDF now' : 'Click to upload PYQ Exam PDF'}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      {activeDoc ? 'Cross-reference exam questions with your uploaded study notes' : 'Enables PYQ Trend Analyzer & Importance Scoring'}
+                    </p>
                   </div>
                 </div>
               )}
@@ -228,24 +248,36 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
 
       {/* Ready Action Bar */}
       {activeDoc && (
-        <div className="flex items-center justify-between p-4 rounded-xl bg-slate-900 border border-emerald-500/30">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl bg-slate-900 border border-emerald-500/30 gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
+            <div className="w-3.5 h-3.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <div>
-              <p className="text-sm font-semibold text-slate-100">Document Ready: {activeDoc.title}</p>
-              <p className="text-xs text-slate-400">
-                {pyqDoc ? `PYQ Paper Linked: ${pyqDoc.title}` : 'You can start asking questions or generate exam papers!'}
+              <p className="text-sm font-semibold text-slate-100">
+                Study Material Scanned: <span className="text-emerald-300">{activeDoc.title}</span>
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {pyqDoc ? (
+                  <span className="text-purple-300 font-medium">
+                    ✓ PYQ Linked: {pyqDoc.title} • Exam prediction & trend heatmaps unlocked!
+                  </span>
+                ) : (
+                  <span>
+                    Ready! You can upload Previous Year Questions (PYQ) above, or proceed directly to study tools.
+                  </span>
+                )}
               </p>
             </div>
           </div>
 
-          <button
-            onClick={onContinue}
-            className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 transition-all shadow-md shadow-emerald-600/30"
-          >
-            Open Chat & Study Tools
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <button
+              onClick={onContinue}
+              className="w-full sm:w-auto px-5 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/30 cursor-pointer"
+            >
+              {pyqDoc ? 'Open Chat & Study Tools' : 'Proceed to Chat & Study Tools'}
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
     </div>

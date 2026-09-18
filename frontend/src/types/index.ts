@@ -126,4 +126,4 @@ export interface PyqAnalysisReport {
   highYieldTopicsSummary: string[];
 }
 
-export type ActiveTab = 'chat' | 'explain' | 'questions' | 'exam-gen' | 'pyq-analyzer' | 'pdf-viewer';
+export type ActiveTab = 'upload' | 'chat' | 'explain' | 'questions' | 'exam-gen' | 'pyq-analyzer' | 'pdf-viewer';

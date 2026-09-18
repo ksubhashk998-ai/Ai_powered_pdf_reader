@@ -8,7 +8,8 @@ import {
   FileCheck, 
   TrendingUp,
   Eye,
-  Languages
+  Languages,
+  Upload
 } from 'lucide-react';
 import type { ActiveTab, LanguageCode, PdfDocument } from '../types';
 import { SUPPORTED_LANGUAGES } from '../utils/sampleData';
@@ -33,12 +34,13 @@ export const Header: React.FC<HeaderProps> = ({
   hasApiKey
 }) => {
   const tabs: { id: ActiveTab; label: string; icon: React.ReactNode; badge?: string }[] = [
-    { id: 'pdf-viewer', label: 'PDF Inspector', icon: <Eye className="w-4 h-4" /> },
+    { id: 'upload', label: 'Upload Center', icon: <Upload className="w-4 h-4" /> },
     { id: 'chat', label: 'Chat with PDF', icon: <MessageSquare className="w-4 h-4" /> },
     { id: 'explain', label: 'AI Explainer', icon: <BookOpen className="w-4 h-4" /> },
     { id: 'questions', label: 'Important Qs', icon: <HelpCircle className="w-4 h-4" />, badge: '2/5/10 Marks' },
     { id: 'exam-gen', label: 'Question Paper', icon: <FileCheck className="w-4 h-4" /> },
     { id: 'pyq-analyzer', label: 'PYQ Analyzer', icon: <TrendingUp className="w-4 h-4" />, badge: 'PYQ vs PDF' },
+    { id: 'pdf-viewer', label: 'PDF Inspector', icon: <Eye className="w-4 h-4" /> },
   ];
 
   return (
@@ -64,13 +66,17 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Active Document Status Indicator */}
           {activeDoc && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs">
-              <FileText className="w-4 h-4 text-emerald-400" />
+            <button
+              onClick={() => setActiveTab('upload')}
+              className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-xs hover:border-indigo-500/40 hover:bg-slate-800/60 transition-all cursor-pointer text-left"
+              title="Click to view/change files in Upload Center"
+            >
+              <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="font-medium text-slate-300 max-w-[200px] truncate" title={activeDoc.fileName}>
                 {activeDoc.title}
               </span>
               <span className="text-slate-500">({activeDoc.pages.length} pgs)</span>
-            </div>
+            </button>
           )}
 
           {/* Right Action Controls: Language & API Key */}
@@ -113,14 +119,19 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-1 overflow-x-auto py-2 scrollbar-none border-t border-slate-900">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
+            const isDisabled = !activeDoc && tab.id !== 'upload';
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                disabled={isDisabled}
+                onClick={() => !isDisabled && setActiveTab(tab.id)}
+                title={isDisabled ? 'Upload study material first to unlock this tool' : undefined}
                 className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${
-                  isActive
+                  isDisabled
+                    ? 'opacity-40 cursor-not-allowed text-slate-600'
+                    : isActive
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 cursor-pointer'
                 }`}
               >
                 {tab.icon}

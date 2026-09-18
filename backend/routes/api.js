@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { parsePdfBuffer } from '../services/pdfParser.js';
 import { extractImportantQuestionsNLP, cleanTextNoise } from '../services/nlpEngine.js';
-import { askGeminiChat, generateGeminiQuestions } from '../services/geminiService.js';
+import { askGeminiChat, generateGeminiQuestions, explainConcept } from '../services/geminiService.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -61,6 +61,34 @@ router.post('/chat', async (req, res) => {
   } catch (error) {
     console.error("Chat route error:", error);
     res.status(500).json({ error: 'Error generating chat response' });
+  }
+});
+
+/**
+ * 2b. POST /api/explain
+ * Explain custom concept at requested level
+ */
+router.post('/explain', async (req, res) => {
+  try {
+    const { document, concept, level, language, apiKey } = req.body;
+    if (!document || !concept) {
+      return res.status(400).json({ error: 'Document and concept required' });
+    }
+
+    const explanation = await explainConcept(
+      document.title,
+      document.text || '',
+      document.pages || [],
+      concept,
+      level || 'Standard',
+      language || 'English',
+      apiKey || req.headers['x-api-key']
+    );
+
+    return res.json({ success: true, explanation });
+  } catch (error) {
+    console.error("Explain route error:", error);
+    res.status(500).json({ error: 'Error generating concept explanation' });
   }
 });
 

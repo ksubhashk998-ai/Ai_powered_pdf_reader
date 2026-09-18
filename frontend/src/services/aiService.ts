@@ -31,6 +31,26 @@ function getAIClient(): GoogleGenAI | null {
   }
 }
 
+async function callGemini(ai: GoogleGenAI, prompt: string): Promise<string> {
+  const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+  let lastError: any = null;
+  for (const model of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt
+      });
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (err: any) {
+      console.warn(`Model ${model} failed, trying next:`, err?.message || err);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("Failed to generate content with Gemini");
+}
+
 const LANGUAGE_NAMES: Record<LanguageCode, string> = {
   en: 'English',
   kn: 'Kannada (ಕನ್ನಡ)',
@@ -48,6 +68,132 @@ export function cleanTopicTitle(text: string): string {
     .trim();
 }
 
+export function searchDocumentForAnswer(
+  document: PdfDocument,
+  question: string,
+  language: LanguageCode = 'en'
+): { answer: string; citations: number[] } {
+  const qLower = question.toLowerCase().trim();
+  const stopWords = new Set([
+    'what', 'is', 'are', 'the', 'a', 'an', 'in', 'on', 'of', 'for', 'to', 'with', 'by', 'from',
+    'this', 'that', 'these', 'those', 'explain', 'describe', 'define', 'give', 'how', 'does', 'why',
+    'can', 'you', 'tell', 'me', 'about', 'and', 'or', 'its', 'their', 'which', 'where', 'when',
+    'state', 'discuss', 'briefly', 'detail', 'example', 'examples'
+  ]);
+
+  const rawTokens = qLower.replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const qTerms = rawTokens.filter(w => !stopWords.has(w) && w.length >= 2);
+  const isFormulaQuery = /formula|equation|math|calculate|expression|derive|derivation|theorem/i.test(qLower);
+  const isDefinitionQuery = /what is|define|definition|meaning|stands for/i.test(qLower);
+
+  const scoredParagraphs: { pageNum: number; text: string; score: number }[] = [];
+  const allPages = (document.pages && document.pages.length > 0) ? document.pages : [{ pageNum: 1, text: document.text }];
+
+  for (const page of allPages) {
+    const rawParagraphs = page.text.split(/\n\s*\n|\r\n\s*\r\n/);
+    for (const para of rawParagraphs) {
+      const cleanPara = para.replace(/\s+/g, ' ').trim();
+      if (cleanPara.length < 25) continue;
+
+      const paraLower = cleanPara.toLowerCase();
+      let score = 0;
+
+      // Penalize syllabus / table of contents / header listings
+      if (/module\s*\d|syllabus|contents|table of contents|vtucircle|course code/i.test(paraLower)) {
+        score -= 8;
+      }
+
+      // Exact phrase match bonus
+      if (qTerms.length >= 2) {
+        const fullPhrase = qTerms.join(' ');
+        if (paraLower.includes(fullPhrase)) {
+          score += 15;
+        }
+      }
+
+      // Keyword matches
+      let matchedCount = 0;
+      for (const term of qTerms) {
+        if (paraLower.includes(term)) {
+          score += 4;
+          matchedCount++;
+        }
+      }
+
+      // High density bonus if all query terms are present
+      if (matchedCount === qTerms.length && qTerms.length > 1) {
+        score += 8;
+      }
+
+      // Definition indicator bonus
+      if (isDefinitionQuery && /is defined as|refers to|is a|means|is the|is an algorithm|consists of/i.test(paraLower)) {
+        score += 6;
+      }
+
+      // Formula indicator bonus
+      if (isFormulaQuery && (/=|\+|\-|\*|\/|\^|∑|sqrt|log|p_i|probability/i.test(cleanPara) || /formula|equation/i.test(paraLower))) {
+        score += 8;
+      }
+
+      if (score > 0) {
+        scoredParagraphs.push({
+          pageNum: page.pageNum,
+          text: cleanPara,
+          score
+        });
+      }
+    }
+  }
+
+  scoredParagraphs.sort((a, b) => b.score - a.score);
+
+  if (scoredParagraphs.length > 0) {
+    const best = scoredParagraphs[0];
+    const bestPage = best.pageNum;
+    
+    // Split into sentences to isolate the key answer
+    const sentences = best.text.match(/[^.!?]+[.!?]+/g) || [best.text];
+    const keySentences = sentences.filter(s => {
+      const sLower = s.toLowerCase();
+      return qTerms.some(t => sLower.includes(t));
+    });
+
+    const primaryAnswer = (keySentences.length > 0 ? keySentences.slice(0, 3).join(' ') : best.text).trim();
+    
+    let additionalContext = '';
+    if (scoredParagraphs.length > 1 && scoredParagraphs[1].score >= 6 && scoredParagraphs[1].text !== best.text) {
+      additionalContext = `\n\n**Key Details & Context:**\n${cleanTopicTitle(scoredParagraphs[1].text.substring(0, 300))}`;
+    }
+
+    if (language === 'kn') {
+      return {
+        answer: `[Page ${bestPage}] **${document.title}** ದಸ್ತಾವೇಜಿನಿಂದ ಉತ್ತರ:\n\n${cleanTopicTitle(primaryAnswer)}${additionalContext}\n\n*ಉಲ್ಲೇಖ: ಪುಟ ${bestPage} ನೋಡಿ.*`,
+        citations: [bestPage]
+      };
+    } else if (language === 'hi') {
+      return {
+        answer: `[Page ${bestPage}] **${document.title}** से उत्तर:\n\n${cleanTopicTitle(primaryAnswer)}${additionalContext}\n\n*संदर्भ: पृष्ठ ${bestPage} देखें।*`,
+        citations: [bestPage]
+      };
+    }
+
+    return {
+      answer: `[Page ${bestPage}] **Direct Answer from Document:**\n\n${cleanTopicTitle(primaryAnswer)}${additionalContext}\n\n*Reference: Page ${bestPage} of "${document.title}".*`,
+      citations: [bestPage]
+    };
+  }
+
+  const topics = (document.text.match(/(?:Chapter|Module|Section|Unit)\s*\d+[:\s]+[^\n.]+/gi) || []).slice(0, 5);
+  const topicsList = topics.length > 0 
+    ? `\n\n**Key topics in this document:**\n${topics.map(t => `• ${cleanTopicTitle(t)}`).join('\n')}`
+    : '';
+
+  return {
+    answer: `[Page 1] I searched **${document.title}** for **"${question}"**, but could not find a direct explanation for that specific term in the document text.${topicsList}\n\n*Tip:* Try asking about the concepts or chapters listed above.`,
+    citations: [1]
+  };
+}
+
 export async function askPdfQuestion(
   document: PdfDocument, 
   question: string,
@@ -59,10 +205,16 @@ export async function askPdfQuestion(
   if (ai) {
     try {
       const prompt = `
-You are an expert AI tutor assisting a student studying the following uploaded PDF document.
-Answer the user's question accurately and thoroughly based ONLY on the provided document text.
-Respond in ${targetLang}.
-Include page citations using format [Page X] where appropriate.
+You are an expert academic AI tutor assisting a student studying the following uploaded PDF document.
+CRITICAL INSTRUCTIONS:
+1. Answer the user's question directly, accurately, and thoroughly based strictly on the provided document text.
+2. DO NOT just list topic headings or concept names! Give the full conceptual explanation, mathematical formulas (if any), definitions, and examples found in the text.
+3. If the user asks "What is X?", provide:
+   - Clear 1-sentence definition
+   - How it works / core mechanisms
+   - Concrete example or formula from the text
+4. Respond in ${targetLang}.
+5. Include page citations using format [Page X] where appropriate.
 
 DOCUMENT TITLE: ${document.title}
 DOCUMENT CONTENT:
@@ -71,12 +223,8 @@ ${document.text.substring(0, 25000)}
 USER QUESTION: ${question}
 `;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt
-      });
-
-      const answer = response.text || "I couldn't generate an answer from the document.";
+      const text = await callGemini(ai, prompt);
+      const answer = text || "I couldn't generate an answer from the document.";
       const citationMatches = [...answer.matchAll(/\[Page (\d+)\]/g)];
       const citations = Array.from(new Set(citationMatches.map(m => parseInt(m[1], 10))));
 
@@ -86,55 +234,8 @@ USER QUESTION: ${question}
     }
   }
 
-  const qTerms = question.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-  let bestPage = 1;
-  let highestScore = 0;
-  let matchingSnippet = '';
-
-  for (const page of document.pages) {
-    const pageTextLower = page.text.toLowerCase();
-    let score = 0;
-    for (const term of qTerms) {
-      if (pageTextLower.includes(term)) score += 1;
-    }
-    if (score > highestScore) {
-      highestScore = score;
-      bestPage = page.pageNum;
-      matchingSnippet = page.text;
-    }
-  }
-
-  if (highestScore > 0 && matchingSnippet) {
-    const sentences = matchingSnippet.split(/(?<=[.!?])\s+/);
-    const relevantSentences = sentences.filter(s => 
-      qTerms.some(t => s.toLowerCase().includes(t))
-    ).slice(0, 4).join(' ');
-
-    const snippetText = cleanTopicTitle(relevantSentences || matchingSnippet.substring(0, 500));
-
-    if (language === 'kn') {
-      return {
-        answer: `[Page ${bestPage}] **${document.title}** ದಸ್ತಾವೇಜಿನ ಪ್ರಕಾರ:\n\n${snippetText}`,
-        citations: [bestPage]
-      };
-    } else if (language === 'hi') {
-      return {
-        answer: `[Page ${bestPage}] **${document.title}** के अनुसार:\n\n${snippetText}`,
-        citations: [bestPage]
-      };
-    }
-
-    return {
-      answer: `[Page ${bestPage}] Based on **${document.title}**:\n\n${snippetText}\n\n*Summary:* The document details these concepts on page ${bestPage}.`,
-      citations: [bestPage]
-    };
-  }
-
-  const preview = cleanTopicTitle(document.pages[0]?.text.substring(0, 400) || document.text.substring(0, 400));
-  return {
-    answer: `[Page 1] From **${document.title}**:\n\n${preview}...\n\n(Ask specific questions regarding topics in this document for targeted page references.)`,
-    citations: [1]
-  };
+  // Use smart NLP paragraph & sentence search
+  return searchDocumentForAnswer(document, question, language);
 }
 
 export async function generateTopicExplanation(
@@ -150,66 +251,70 @@ export async function generateTopicExplanation(
   if (ai) {
     try {
       const prompt = `
-Explain the concept "${cleanedTopic}" from the document "${document.title}" in clear, thorough detail.
-Explanation style level: ${level} (ELI5 = Explain like I am 5 years old with clear analogies, Standard = Comprehensive high school/college explanation with diagrams & steps, Advanced = In-depth technical derivation, formulas, and edge cases).
-Target Output Language: ${targetLang}.
-Provide a multi-paragraph explanation with clear headings, bullet points, and real-world examples.
-DOCUMENT TEXT: ${document.text.substring(0, 20000)}
+You are an expert educator explaining the concept "${cleanedTopic}" from the uploaded document "${document.title}".
+EXPLANATION LEVEL: ${level}
+- ELI5: Explain Like I'm 5 with simple, intuitive everyday analogies, zero jargon, and real-world clarity.
+- Standard: Academic high school/college explanation with clear definitions, bullet points, core mechanisms, formulas, and practical applications.
+- Advanced: Rigorous technical explanation including mathematical derivations, algorithmic workflows, formulas, and edge cases.
+
+TARGET OUTPUT LANGUAGE: ${targetLang}.
+Format cleanly with Markdown headings (###), bullet points, and bold text.
+DOCUMENT TEXT: ${document.text.substring(0, 25000)}
 `;
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt
-      });
-      return response.text || "Could not generate explanation.";
+      const text = await callGemini(ai, prompt);
+      if (text) return text;
     } catch (e) {
-      console.warn("AI explanation call fallback:", e);
+      console.warn("AI explanation call fallback to smart NLP extraction:", e);
     }
   }
 
-  const matchingPage = document.pages.find(p => p.text.toLowerCase().includes(cleanedTopic.toLowerCase())) || document.pages[0];
-  const contextSnippet = cleanTopicTitle(matchingPage ? matchingPage.text.substring(0, 600) : document.text.substring(0, 600));
+  // Smart heuristic extraction for concept explanation
+  const searchRes = searchDocumentForAnswer(document, `${cleanedTopic} definition formula explanation`, language);
+  const citationPage = searchRes.citations[0] || 1;
+  const docAnswer = searchRes.answer.replace(/\[Page \d+\]/g, '').replace(/\*Reference:.*$/m, '').trim();
 
   if (level === 'ELI5') {
-    return `### 🎈 ${cleanedTopic} (Simple ELI5 Analogy)
+    return `### 🎈 ${cleanedTopic} (Simple ELI5 Explanation)
 
-Imagine you are trying to understand how **${cleanedTopic}** works in everyday life:
+#### 🌟 The Big Picture Analogy
+Imagine you want to understand **${cleanedTopic}**:
+Instead of dealing with confusing details, think of it like an everyday organizing rule: it gives computers and students a simple, clear recipe to analyze information and get the right answer!
 
-• **The Basic Idea**: Just like sorting your study notes into distinct color-coded folders, ${cleanedTopic} organizes complex data into simple, actionable steps.
-• **Core Takeaway from Document**: "${contextSnippet.substring(0, 250)}..."
-• **Why it Matters**: It helps computers and students quickly make sense of large amounts of information without confusion!`;
+#### 📖 What Your Document Explains [Page ${citationPage}]
+${docAnswer}
+
+#### 💡 Why it Matters
+It breaks down complex problems into clear, manageable steps so you can solve exam questions and understand real-world patterns!`;
   }
 
   if (level === 'Advanced') {
     return `### 🔬 ${cleanedTopic} (Advanced Technical Breakdown)
 
-#### 1. Mathematical & Theoretical Framework
-According to **${document.title}**, ${cleanedTopic} represents a primary analytical model:
-> "${contextSnippet}"
+#### 1. Theoretical Framework & Mathematical Definition
+According to **${document.title}** [Page ${citationPage}]:
+${docAnswer}
 
 #### 2. Architectural Mechanics & Equations
-• **Input Representation**: Encodes raw input variables into structured mathematical representations.
-• **Core Evaluation Metric**: Optimizes decision splits and probability boundaries to minimize systemic error.
-• **Algorithmic Convergence**: Iteratively refines parameters until reaching optimal classification accuracy.
+• **Parameter Formulation**: Formalizes inputs into structured vectors optimized against task criteria.
+• **Algorithmic Convergence**: Evaluates loss boundaries and balances bias vs variance across training partitions.
+• **Systemic Constraints**: Addresses computational complexity, feature independence, and edge-case handling.
 
-#### 3. Real-World Applications & Edge Cases
-Used in high-dimensional data processing, pattern recognition, and decision optimization pipelines.`;
+#### 3. Real-World Applications
+Applied in high-dimensional classification pipelines, pattern recognition engines, and analytical inference.`;
   }
 
   return `### 📘 ${cleanedTopic} (Standard Academic Explanation)
 
 #### 1. Concept Definition & Context
-**${cleanedTopic}** is a fundamental topic covered in **${document.title}**. 
+**${cleanedTopic}** is a core topic detailed in **${document.title}** [Page ${citationPage}].
 
-Key passage from the document:
-> "${contextSnippet}"
+#### 2. Detailed Explanation from Document
+${docAnswer}
 
-#### 2. Key Features & Working Steps
-1. **Initial Setup**: Identifies the primary input variables and objective targets.
-2. **Execution Process**: Applies systematic rules or mathematical equations to analyze relationships.
-3. **Final Result**: Yields clear predictions or structured summaries for decision-making.
-
-#### 3. Practical Example
-In real-world problem solving, ${cleanedTopic} is applied to automate complex evaluations, ensure accuracy, and streamline analytical workflows.`;
+#### 3. Key Working Steps & Takeaways
+1. **Input Setup**: Gathers the required features and establishes the target classification objective.
+2. **Analysis & Calculation**: Applies systematic mathematical rules or algorithm steps to evaluate relationships.
+3. **Prediction / Output**: Generates structured decisions or probability scores for problem-solving.`;
 }
 
 export async function generateChapterSummaries(
@@ -237,12 +342,7 @@ Return JSON matching this array structure:
 ]
 DOCUMENT TEXT: ${document.text.substring(0, 20000)}
 `;
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt
-      });
-
-      const text = response.text || '';
+      const text = await callGemini(ai, prompt);
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
@@ -358,12 +458,7 @@ Return JSON array format:
 ]
 DOCUMENT TEXT: ${document.text.substring(0, 25000)}
 `;
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt
-      });
-
-      const text = response.text || '';
+      const text = await callGemini(ai, prompt);
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]) as QuestionItem[];
@@ -548,12 +643,7 @@ Return JSON matching format:
 }
 DOCUMENT TEXT: ${document.text.substring(0, 20000)}
 `;
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt
-      });
-
-      const text = response.text || '';
+      const text = await callGemini(ai, prompt);
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const paper = JSON.parse(jsonMatch[0]) as GeneratedQuestionPaper;

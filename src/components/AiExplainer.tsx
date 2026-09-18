@@ -4,10 +4,12 @@ import {
   Sparkles, 
   Layers, 
   Zap,
-  Bookmark
+  Bookmark,
+  Search
 } from 'lucide-react';
 import type { PdfDocument, LanguageCode, ExplanationLevel, ChapterSummary } from '../types';
-import { generateTopicExplanation, generateChapterSummaries } from '../services/aiService';
+import { generateTopicExplanation, generateChapterSummaries, cleanTopicTitle } from '../services/aiService';
+import { fetchExplanationFromBackend } from '../services/apiClient';
 
 interface AiExplainerProps {
   document: PdfDocument | null;
@@ -20,38 +22,45 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
   language,
   onOpenUpload
 }) => {
-  const [selectedTopic, setSelectedTopic] = useState('ID3 Algorithm & Decision Trees');
-  const [customTopic, setCustomTopic] = useState('');
+  const [activeConcept, setActiveConcept] = useState('Core Concept Overview');
+  const [searchInput, setSearchInput] = useState('');
   const [explanationLevel, setExplanationLevel] = useState<ExplanationLevel>('ELI5');
   const [explanationText, setExplanationText] = useState('');
   const [isLoadingExplanation, setIsLoadingExplanation] = useState(false);
   const [summaries, setSummaries] = useState<ChapterSummary[]>([]);
   const [isLoadingSummaries, setIsLoadingSummaries] = useState(false);
 
-  const sampleTopics = [
-    'ID3 Algorithm & Decision Trees',
-    'Naive Bayes Probabilistic Classifier',
-    'Bias-Variance Tradeoff & Overfitting',
-    'Precision, Recall & Confusion Matrix',
-    'K-Nearest Neighbors (KNN)'
-  ];
-
-  // Fetch explanation when topic, level, or language changes
   useEffect(() => {
-    if (!document) return;
-    const topicToExplain = customTopic.trim() || selectedTopic;
+    if (!document || !activeConcept.trim()) return;
     setIsLoadingExplanation(true);
-    generateTopicExplanation(document, topicToExplain, explanationLevel, language)
-      .then(res => setExplanationText(res))
+    
+    // Try Express backend first, then fallback to client-side engine
+    fetchExplanationFromBackend(document, activeConcept, explanationLevel, language)
+      .then(res => {
+        if (res) {
+          setExplanationText(res);
+        } else {
+          return generateTopicExplanation(document, activeConcept, explanationLevel, language)
+            .then(fallbackRes => setExplanationText(fallbackRes));
+        }
+      })
+      .catch(() => {
+        generateTopicExplanation(document, activeConcept, explanationLevel, language)
+          .then(fallbackRes => setExplanationText(fallbackRes));
+      })
       .finally(() => setIsLoadingExplanation(false));
-  }, [document, selectedTopic, customTopic, explanationLevel, language]);
+  }, [document, activeConcept, explanationLevel, language]);
 
-  // Fetch summaries
   useEffect(() => {
     if (!document) return;
     setIsLoadingSummaries(true);
     generateChapterSummaries(document, language)
-      .then(res => setSummaries(res))
+      .then(res => {
+        setSummaries(res);
+        if (res.length > 0 && activeConcept === 'Core Concept Overview') {
+          setActiveConcept(res[0].title);
+        }
+      })
       .finally(() => setIsLoadingSummaries(false));
   }, [document, language]);
 
@@ -73,12 +82,20 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
     );
   }
 
+  const sampleTopics = summaries.length > 0 
+    ? summaries.map(s => s.title)
+    : ['Core Concept Overview', 'Key Algorithms & Formulas', 'Model Evaluation & Metrics'];
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchInput.trim()) {
+      setActiveConcept(searchInput.trim());
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fadeIn max-w-6xl mx-auto">
-      
-      {/* 1. Interactive Topic Explainer Section */}
       <div className="glass-card rounded-2xl p-6 sm:p-8 border border-slate-800 space-y-6">
-        
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-lg">
@@ -86,11 +103,10 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
             </div>
             <div>
               <h2 className="text-xl font-bold text-slate-100">AI Concept Explainer</h2>
-              <p className="text-xs text-slate-400">Simplifies tough textbook concepts into easy-to-understand explanations</p>
+              <p className="text-xs text-slate-400">Simplifies tough textbook concepts into clear, multi-paragraph explanations</p>
             </div>
           </div>
 
-          {/* Explanation Depth Control Chips */}
           <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-xl">
             {(['ELI5', 'Standard', 'Advanced'] as ExplanationLevel[]).map((lvl) => (
               <button
@@ -108,76 +124,102 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
           </div>
         </div>
 
-        {/* Topic Selector & Custom Search Input */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          
-          <div className="md:col-span-1 space-y-2">
-            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Select Key Topic</label>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-1 space-y-3">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Suggested Key Topics</span>
+            </label>
             <div className="space-y-1.5">
-              {sampleTopics.map((top) => (
-                <button
-                  key={top}
-                  onClick={() => {
-                    setCustomTopic('');
-                    setSelectedTopic(top);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded-xl text-xs font-medium border transition-all ${
-                    selectedTopic === top && !customTopic
-                      ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-200'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {top}
-                </button>
-              ))}
+              {sampleTopics.slice(0, 6).map((top) => {
+                const isSelected = activeConcept.toLowerCase() === top.toLowerCase();
+                return (
+                  <button
+                    key={top}
+                    onClick={() => {
+                      setSearchInput(top);
+                      setActiveConcept(top);
+                    }}
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-medium border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-200 shadow-sm'
+                        : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-semibold">{cleanTopicTitle(top)}</div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="md:col-span-2 space-y-3 flex flex-col justify-between">
-            <div>
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">Or Explain Custom Concept</label>
-              <input
-                type="text"
-                placeholder="e.g., Information Gain formula, Confusion matrix..."
-                value={customTopic}
-                onChange={(e) => setCustomTopic(e.target.value)}
-                className="w-full mt-1.5 px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
-              />
+          <div className="md:col-span-2 space-y-4 flex flex-col justify-between">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                <span>Search & Explain Any Concept</span>
+                {activeConcept && (
+                  <span className="text-[11px] text-indigo-300 font-normal">
+                    Explaining: <strong className="text-white font-medium">{activeConcept}</strong>
+                  </span>
+                )}
+              </label>
+
+              <form onSubmit={handleSearchSubmit} className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Type concept (e.g. Entropy formula, Supervised Learning, Confusion matrix...)"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs sm:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={!searchInput.trim() || isLoadingExplanation}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 cursor-pointer shadow-md shadow-indigo-600/30"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Explain</span>
+                </button>
+              </form>
             </div>
 
-            {/* Explanation Result Card */}
-            <div className="bg-slate-950/80 rounded-2xl p-6 border border-slate-900 min-h-[260px] flex flex-col justify-between">
+            <div className="bg-slate-950/80 rounded-2xl p-6 border border-slate-900 min-h-[300px] flex flex-col justify-between">
               {isLoadingExplanation ? (
-                <div className="my-auto text-center space-y-3 py-10">
+                <div className="my-auto text-center space-y-3 py-12">
                   <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
-                  <p className="text-xs text-indigo-300">Generating simple explanation in selected language...</p>
+                  <p className="text-xs text-indigo-300">
+                    Analyzing "{activeConcept}" across document pages and synthesizing {explanationLevel} explanation...
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-4 text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
+                <div className="space-y-4 text-xs sm:text-sm text-slate-200 leading-relaxed whitespace-pre-wrap font-sans">
                   {explanationText}
                 </div>
               )}
 
-              <div className="pt-4 border-t border-slate-900 flex items-center justify-between text-[11px] text-slate-500">
-                <span>Explanation Mode: {explanationLevel}</span>
+              <div className="pt-4 border-t border-slate-900 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  Concept: <strong className="text-slate-300">{activeConcept}</strong>
+                </span>
+                <span>Mode: <strong className="text-indigo-300">{explanationLevel}</strong></span>
                 <span>Document: {document.title}</span>
               </div>
             </div>
-
           </div>
-
         </div>
-
       </div>
 
-      {/* 2. Automatic Chapter Summaries Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Layers className="w-5 h-5 text-indigo-400" />
             <h2 className="text-lg font-bold text-slate-100">Automatic Chapter Summaries</h2>
           </div>
-          <span className="text-xs text-slate-400">{summaries.length} Chapters Extracted</span>
+          <span className="text-xs text-slate-400">{summaries.length} Sections Extracted</span>
         </div>
 
         {isLoadingSummaries ? (
@@ -193,7 +235,7 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
                     Chapter {sum.chapterNumber}
                   </span>
                   <h3 className="font-bold text-slate-100 text-sm truncate max-w-[240px]" title={sum.title}>
-                    {sum.title}
+                    {cleanTopicTitle(sum.title)}
                   </h3>
                 </div>
 
@@ -201,7 +243,6 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
                   {sum.summary}
                 </p>
 
-                {/* Key Takeaways */}
                 <div className="space-y-1.5 pt-2">
                   <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                     <Sparkles className="w-3 h-3 text-amber-400" /> Key Takeaways:
@@ -210,13 +251,12 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
                     {sum.keyTakeaways.map((tk, idx) => (
                       <li key={idx} className="text-xs text-slate-300 flex items-start gap-2">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                        <span>{tk}</span>
+                        <span>{cleanTopicTitle(tk)}</span>
                       </li>
                     ))}
                   </ul>
                 </div>
 
-                {/* Key Terms */}
                 {sum.keyTerms && sum.keyTerms.length > 0 && (
                   <div className="pt-2 border-t border-slate-900 space-y-1.5">
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
@@ -225,8 +265,8 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
                     <div className="space-y-1">
                       {sum.keyTerms.map((kt, idx) => (
                         <div key={idx} className="text-xs bg-slate-950 p-2 rounded-lg border border-slate-900">
-                          <span className="font-bold text-indigo-300">{kt.term}: </span>
-                          <span className="text-slate-400">{kt.definition}</span>
+                          <span className="font-bold text-indigo-300">{cleanTopicTitle(kt.term)}: </span>
+                          <span className="text-slate-400">{cleanTopicTitle(kt.definition)}</span>
                         </div>
                       ))}
                     </div>
@@ -237,7 +277,6 @@ export const AiExplainer: React.FC<AiExplainerProps> = ({
           </div>
         )}
       </div>
-
     </div>
   );
 };

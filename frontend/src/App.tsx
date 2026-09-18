@@ -37,7 +37,7 @@ import {
 } from './services/aiService';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('chat');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('upload');
   const [activeDoc, setActiveDoc] = useState<PdfDocument | null>(null);
   const [pyqDoc, setPyqDoc] = useState<PyqDocument | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<LanguageCode>('en');
@@ -61,7 +61,7 @@ export function App() {
       />
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {!activeDoc ? (
+        {(!activeDoc || activeTab === 'upload') ? (
           <DocumentUpload
             activeDoc={activeDoc}
             setActiveDoc={setActiveDoc}
@@ -72,19 +72,10 @@ export function App() {
         ) : (
           <>
             {activeTab === 'pdf-viewer' && (
-              <div className="space-y-8">
-                <DocumentUpload
-                  activeDoc={activeDoc}
-                  setActiveDoc={setActiveDoc}
-                  pyqDoc={pyqDoc}
-                  setPyqDoc={setPyqDoc}
-                  onContinue={() => setActiveTab('chat')}
-                />
-                <PdfViewer
-                  document={activeDoc}
-                  onOpenUpload={() => setActiveTab('pdf-viewer')}
-                />
-              </div>
+              <PdfViewer
+                document={activeDoc}
+                onOpenUpload={() => setActiveTab('upload')}
+              />
             )}
 
             {activeTab === 'chat' && (
@@ -92,7 +83,7 @@ export function App() {
                 key={activeDoc.id}
                 document={activeDoc}
                 language={selectedLanguage}
-                onOpenUpload={() => setActiveTab('pdf-viewer')}
+                onOpenUpload={() => setActiveTab('upload')}
               />
             )}
 
@@ -101,7 +92,7 @@ export function App() {
                 key={activeDoc.id}
                 document={activeDoc}
                 language={selectedLanguage}
-                onOpenUpload={() => setActiveTab('pdf-viewer')}
+                onOpenUpload={() => setActiveTab('upload')}
               />
             )}
 
@@ -110,7 +101,7 @@ export function App() {
                 key={activeDoc.id}
                 document={activeDoc}
                 language={selectedLanguage}
-                onOpenUpload={() => setActiveTab('pdf-viewer')}
+                onOpenUpload={() => setActiveTab('upload')}
               />
             )}
 
@@ -118,7 +109,7 @@ export function App() {
               <QuestionPaperGen
                 key={activeDoc.id}
                 document={activeDoc}
-                onOpenUpload={() => setActiveTab('pdf-viewer')}
+                onOpenUpload={() => setActiveTab('upload')}
               />
             )}
 
@@ -127,7 +118,7 @@ export function App() {
                 key={`${activeDoc.id}-${pyqDoc?.id || 'none'}`}
                 studyDoc={activeDoc}
                 pyqDoc={pyqDoc}
-                onOpenUpload={() => setActiveTab('pdf-viewer')}
+                onOpenUpload={() => setActiveTab('upload')}
               />
             )}
           </>
